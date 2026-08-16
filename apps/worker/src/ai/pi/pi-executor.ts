@@ -286,6 +286,7 @@ export async function runPiPrompt(
   const tools = [...BUILTIN_TOOLS, ...customTools.map((t) => t.name)];
 
   let turnCount = 0;
+  let toolCallCount = 0;
   let pendingError: PentestError | null = null;
   // Declared out here so the catch can bill spend accrued before a failure.
   let session: AgentSession | undefined;
@@ -326,6 +327,7 @@ export async function runPiPrompt(
           break;
         }
         case 'tool_execution_start': {
+          toolCallCount += 1;
           void auditLogger.logToolStart(event.toolName, event.args);
           const toolLines = formatToolCall(
             event.toolName,
@@ -356,7 +358,27 @@ export async function runPiPrompt(
     });
 
     // 6. Run the agent to completion (resolves at agent_end).
+    // PATCH(deepseek-compat): Providers like DeepSeek (OpenAI chat-completions
+    // dialect) may end their first turn with plain text and no tool call, which
+    // pi treats as task completion — the agent then dies in OutputValidation.
+    // If the run finished without ever invoking a tool, steer it to continue.
+    const MAX_CONTINUATIONS = 5;
     await session.prompt(fullPrompt);
+    let continuations = 0;
+    while (
+      toolCallCount === 0 &&
+      !pendingError &&
+      continuations < MAX_CONTINUATIONS &&
+      !(cancellationSignal?.aborted ?? false)
+    ) {
+      continuations += 1;
+      logger.info(
+        `[shannon-patch] runPiPrompt(${description}) ended with zero tool calls; steering continuation ${continuations}/${MAX_CONTINUATIONS}`,
+      );
+      await session.prompt(
+        'You replied with text only and did not invoke any tools. Continue the task NOW by calling your tools (bash, read, grep, glob, etc.). Do not describe what you intend to do — execute it. Every response MUST include tool calls until the task is fully complete and the required deliverable file is written.',
+      );
+    }
     session.dispose();
 
     // 7. Surface any error captured during the run.
