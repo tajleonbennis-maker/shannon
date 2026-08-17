@@ -13,6 +13,8 @@ export interface ShannonConfig {
   openai?: { api_key?: string; format?: string };
   xai?: { api_key?: string };
   bedrock?: { region?: string; token?: string };
+  // PATCH(cn-models): deepseek section mirrors pi's DEEPSEEK_API_KEY env var.
+  deepseek?: { api_key?: string };
   /** Generic credential for any provider Shannon does not curate. Maps to SHANNON_AI_API_KEY. */
   provider?: { api_key?: string };
 }
