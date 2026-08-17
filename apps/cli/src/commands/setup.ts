@@ -46,6 +46,8 @@ const MODEL_SUGGESTIONS: Readonly<Record<CuratedProviderId, readonly string[]>> 
   openai: ['gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4'],
   xai: ['grok-4.5'],
   'amazon-bedrock': ['us.anthropic.claude-sonnet-4-6', 'us.anthropic.claude-opus-4-8', 'us.anthropic.claude-opus-4-7'],
+  // PATCH(cn-models): DeepSeek is pi-native; model ids come from pi's deepseek catalogue.
+  deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-r1'],
 };
 
 /** Placeholder shown in the free-text model ID prompt, per curated provider. */
@@ -54,6 +56,7 @@ const MODEL_ID_PLACEHOLDER: Readonly<Record<CuratedProviderId, string>> = {
   openai: 'gpt-5.6-sol',
   xai: 'grok-4.5',
   'amazon-bedrock': 'us.anthropic.claude-opus-4-8',
+  deepseek: 'deepseek-v4-flash',
 };
 
 /** Model ID placeholder for a provider, absent when the provider is not curated. */
@@ -75,6 +78,8 @@ export async function setup(): Promise<void> {
       { value: 'openai' as const, label: 'OpenAI', hint: 'GPT models' },
       { value: 'xai' as const, label: 'xAI', hint: 'Grok models' },
       { value: 'amazon-bedrock' as const, label: 'AWS Bedrock', hint: 'Claude models via AWS' },
+      // PATCH(cn-models): DeepSeek curated; qwen/glm go through "Custom Base URL" or "Other provider".
+      { value: 'deepseek' as const, label: 'DeepSeek', hint: 'DeepSeek models (国产) - cn patch' },
       { value: CUSTOM_BASE_URL as typeof CUSTOM_BASE_URL, label: 'Custom Base URL', hint: 'your own proxy or gateway' },
       {
         value: OTHER_PROVIDER as typeof OTHER_PROVIDER,
@@ -135,6 +140,10 @@ async function setupProvider(provider: CuratedProviderId): Promise<ShannonConfig
       return { openai: { api_key: await promptSecret('Enter your OpenAI API key') } };
     case 'xai':
       return { xai: { api_key: await promptSecret('Enter your xAI API key') } };
+    // PATCH(cn-models): DeepSeek stores its key in the provider's own section,
+    // mirroring how pi reads DEEPSEEK_API_KEY at runtime.
+    case 'deepseek':
+      return { deepseek: { api_key: await promptSecret('Enter your DeepSeek API key') } };
   }
 }
 
