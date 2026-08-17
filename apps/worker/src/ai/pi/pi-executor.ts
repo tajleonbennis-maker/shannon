@@ -30,7 +30,8 @@ import { isBrowserAgent } from '../../utils/browser-agents.js';
 import { formatTimestamp } from '../../utils/formatting.js';
 import { Timer } from '../../utils/metrics.js';
 import { createAuditLogger } from '../audit-logger.js';
-import { resolveModelSelection } from '../models.js';
+import { resolveModelSelection, resolveSubModelSelection } from '../models.js';
+import type { ModelSelection } from '../models.js';
 import {
   detectExecutionContext,
   formatAssistantOutput,
@@ -257,15 +258,33 @@ export async function runPiPrompt(
 
   // 4. Resolve model + auth, then assemble the tool set (universal task/todo tools
   //    plus any caller-supplied collector/submit tools).
+  // PATCH(cost-opt): resolve an optional cheaper sub-agent model for `task`
+  // sub-sessions. Sub-agents do the bulk of source reading on big repos, so
+  // running them on a cheaper model cuts cost substantially. Falls back to the
+  // parent model when SHANNON_AI_SUBMODEL is unset.
   const selection = await resolveModelSelection();
+  let subModelSelection: ModelSelection | null = null;
+  try {
+    subModelSelection = await resolveSubModelSelection();
+    if (subModelSelection) {
+      logger.info(
+        `[shannon-patch] sub-agent model: ${subModelSelection.modelId} (SHANNON_AI_SUBMODEL); parent: ${selection.modelId}`,
+      );
+    }
+  } catch (err) {
+    // A misconfigured sub-model must not silently fall back to the expensive
+    // parent model — surface it so the operator fixes the config.
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`SHANNON_AI_SUBMODEL misconfigured: ${msg}`);
+  }
   const resourceLoader = await buildResourceLoader(sourceDir, logger, agentName);
   // Accumulates usage from in-process `task` child sessions so the parent's reported
   // cost includes sub-agent spend (their getSessionStats is separate from ours).
   const childUsage: ChildUsage = { cost: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
   const customTools: ToolDefinition[] = [
     createTaskTool({
-      model: selection.model,
-      modelRuntime: selection.modelRuntime,
+      model: subModelSelection?.model ?? selection.model,
+      modelRuntime: subModelSelection?.modelRuntime ?? selection.modelRuntime,
       cwd: sourceDir,
       onUsage: (usage) => {
         childUsage.cost += usage.cost;
