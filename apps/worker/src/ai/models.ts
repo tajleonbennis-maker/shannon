@@ -30,8 +30,16 @@ import { getAgentDir, ModelRuntime } from '@earendil-works/pi-coding-agent';
  * Providers Shannon curates with their own credential variables, config sections,
  * and setup flows. Each is a pi-ai provider id; any other pi provider is still
  * reachable through the generic credential path below.
+ *
+ * PATCH(cn-models): deepseek is curated because pi ships a native `deepseek`
+ * provider (chat-completions dialect, reasoning-aware maxTokens). Qwen / GLM
+ * are NOT curated: pi's `openai` provider hardcodes the Responses API, which
+ * most CN gateways do not serve for those models — use the `openrouter:` prefix
+ * with SHANNON_AI_BASE_URL instead (pi's openrouter provider speaks
+ * chat-completions, which CN gateways like Aliyun MaaS accept). See
+ * docs/supported-models-cn.md.
  */
-export const CURATED_PROVIDERS = ['anthropic', 'openai', 'xai', 'amazon-bedrock'] as const;
+export const CURATED_PROVIDERS = ['anthropic', 'openai', 'xai', 'amazon-bedrock', 'deepseek'] as const;
 
 export type CuratedProviderId = (typeof CURATED_PROVIDERS)[number];
 
@@ -46,13 +54,14 @@ export const GENERIC_API_KEY_ENV = 'SHANNON_AI_API_KEY';
  * Env vars carrying each curated provider's API key, in precedence order. Shannon
  * does not invent credential names — these are the variables each provider's own
  * tooling uses. Bedrock pairs its bearer token with AWS_REGION, which is provider
- * config rather than a credential.
+ * config rather than a credential. deepseek reads DEEPSEEK_API_KEY (pi-native).
  */
 export const PROVIDER_API_KEY_ENV: Readonly<Record<CuratedProviderId, readonly string[]>> = {
   anthropic: ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'],
   openai: ['OPENAI_API_KEY'],
   xai: ['XAI_API_KEY'],
   'amazon-bedrock': ['AWS_BEARER_TOKEN_BEDROCK'],
+  deepseek: ['DEEPSEEK_API_KEY'],
 };
 
 /** Model used when SHANNON_AI_MODEL is unset. */
