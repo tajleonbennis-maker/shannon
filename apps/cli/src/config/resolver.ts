@@ -49,6 +49,9 @@ const CONFIG_MAP: readonly ConfigMapping[] = [
   { env: 'AWS_REGION', toml: 'bedrock.region', type: 'string' },
   { env: 'AWS_BEARER_TOKEN_BEDROCK', toml: 'bedrock.token', type: 'string' },
 
+  // PATCH(cn-models): DeepSeek — its key maps to pi's DEEPSEEK_API_KEY env var.
+  { env: 'DEEPSEEK_API_KEY', toml: 'deepseek.api_key', type: 'string' },
+
   // Generic — credential for any provider Shannon does not curate
   { env: GENERIC_API_KEY_ENV, toml: 'provider.api_key', type: 'string' },
 ] as const;
@@ -59,6 +62,8 @@ const PROVIDER_SECTIONS: Readonly<Record<CuratedProviderId, string>> = {
   openai: 'openai',
   xai: 'xai',
   'amazon-bedrock': 'bedrock',
+  // PATCH(cn-models): deepseek's key lives in its own TOML section, like the others.
+  deepseek: 'deepseek',
 };
 
 /** TOML section holding the generic credential for uncurated providers. */
