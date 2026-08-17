@@ -24,15 +24,19 @@
 [core]
 model = "deepseek:deepseek-v4-flash"
 
-[provider]
+[deepseek]
 api_key = "sk-你的DeepSeek-KEY"
 ```
 
 **说明：**
 - 走 pi-ai 原生 `deepseek:` 提供商，模型目录自带 maxTokens=384000 与 reasoning 兼容标志
+- DeepSeek 是 curated provider，key 必须写在 **`[deepseek]` 段**（映射 `DEEPSEEK_API_KEY`，见 `apps/cli/src/config/resolver.ts`）
 - 已通过 deepseek-compat 补丁修复"零工具调用即终止"问题（续跑循环最多 5 次）
 - **前提**：必须使用带 `deepseek:` 前缀补丁的定制版镜像（`keygraph/shannon:2.4.0`），官方原版不支持
 - 版本要求：API 余额充足（注意 402 Insufficient Balance）
+
+> ⚠️ 不要写成 `[provider]` 段——那映射的是通用 `SHANNON_AI_API_KEY`，
+> curated provider（deepseek）不会读取，CLI 校验会直接报 `[deepseek] requires api_key`。
 
 ---
 
@@ -71,6 +75,8 @@ base_url = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
 api_key = "sk-sp-你的阿里云KEY"
 ```
 
+> openrouter 前缀是非 curated 通道，key 走 `[provider]` 段（映射 `SHANNON_AI_API_KEY`）——这里写 `[provider]` 是正确的。
+
 ### 已验证模型
 
 | 模型 | 端点 | preflight | 工具调用 | 扫描验证 |
@@ -103,7 +109,32 @@ api_key = "sk-你的KEY"
 
 ---
 
-## 4. 已知限制与注意事项
+## 4. 子代理成本优化（SHANNON_AI_SUBMODEL）
+
+完整一次 recon 的 ~85% token 花在 8 个子代理各自重复读取源码上。子代理与主 agent 共用同一个贵模型，成本失控。
+
+**让 `task` 子代理使用更便宜的模型**（主 agent 保持强模型），预计可降低 3–5 倍成本。
+
+```toml
+[core]
+model = "deepseek:deepseek-v4-pro"      # 主 agent：强模型
+sub_model = "deepseek:deepseek-v4-flash" # 子代理：便宜模型（SHANNON_AI_SUBMODEL）
+```
+
+或环境变量方式：
+
+```bash
+export SHANNON_AI_MODEL="deepseek:deepseek-v4-pro"
+export SHANNON_AI_SUBMODEL="deepseek:deepseek-v4-flash"
+```
+
+**限制：**
+- 子模型必须与主模型**同 provider**（共享凭据），跨 provider 配置会直接报错，防止静默回退
+- 验证：设置后，子代理 metrics 的 `model` 字段应与主 agent 不同
+
+---
+
+## 5. 已知限制与注意事项
 
 | 限制 | 说明 |
 |---|---|
@@ -115,7 +146,7 @@ api_key = "sk-你的KEY"
 
 ---
 
-## 5. 环境变量方式（等价配置）
+## 6. 环境变量方式（等价配置）
 
 ```bash
 export SHANNON_AI_MODEL="openrouter:glm-5.2"
@@ -126,4 +157,4 @@ npx @keygraph/shannon start -u http://your-app -r /path/to/repo
 
 ---
 
-*本文档基于真实部署验证：165.154.226.119 服务器，DeepTutor 目标扫描。*
+*本文档基于内部验证环境实测（目标为自建测试应用）。*
