@@ -2,6 +2,13 @@
 
 <div align="center">
 
+**English** | [中文](README_CN.md)
+
+</div>
+
+
+<div align="center">
+
 Shannon is an autonomous, AI-driven penetration testing framework for web applications and APIs.
 It analyzes your source code, identifies attack paths, and executes real exploits to prove
 vulnerabilities before they reach production.
