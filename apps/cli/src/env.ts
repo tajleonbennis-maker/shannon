@@ -31,6 +31,9 @@ const COMMON_FORWARD_VARS = [
   'SHANNON_AI_MODEL',
   'SHANNON_AI_BASE_URL',
   'SHANNON_AI_OPENAI_FORMAT',
+  // PATCH(cost-opt): cheaper model for task sub-agents, forwarded so the worker
+  // can resolve it in-container. Unset → sub-agents inherit the parent model.
+  'SHANNON_AI_SUBMODEL',
   GENERIC_API_KEY_ENV,
 ] as const;
 
