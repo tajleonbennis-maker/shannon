@@ -33,6 +33,8 @@ const CONFIG_MAP: readonly ConfigMapping[] = [
   // Core — base_url points any provider at a proxy or gateway
   { env: 'SHANNON_AI_MODEL', toml: 'core.model', type: 'string' },
   { env: 'SHANNON_AI_BASE_URL', toml: 'core.base_url', type: 'string' },
+  // PATCH(cost-opt): cheaper sub-agent model for task sub-sessions.
+  { env: 'SHANNON_AI_SUBMODEL', toml: 'core.sub_model', type: 'string' },
 
   // Anthropic
   { env: 'ANTHROPIC_API_KEY', toml: 'anthropic.api_key', type: 'string' },
