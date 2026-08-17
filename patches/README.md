@@ -36,6 +36,10 @@ docker build -f Dockerfile.patch -t keygraph/shannon:2.4.0 .
 [core]
 model = "deepseek:deepseek-v4-flash"
 
-[provider]
+[deepseek]
 api_key = "sk-..."
 ```
+
+> ⚠️ deepseek 是 curated provider，key 必须写在 `[deepseek]` 段（映射 `DEEPSEEK_API_KEY`）。
+> 写在 `[provider]` 段不会被读取，CLI 校验会报 `[deepseek] requires api_key`。
+> 详见 `docs/supported-models-cn.md` 与 `scripts/shannon_cn_config.py`。
