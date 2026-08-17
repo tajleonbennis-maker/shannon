@@ -108,7 +108,49 @@ For source builds, authenticated scans, provider-specific setup, and platform no
 - **OWASP-focused coverage**: Shannon targets exploitable Injection, XSS, SSRF, Broken Authentication, and Broken Authorization issues.
 - **Resumable workspaces**: Shannon can resume interrupted runs without re-running completed agents.
 
+## Chinese Model Support (CN Patch)
+
+This fork adds first-class support for Chinese LLM providers on top of the upstream build,
+plus companion tooling for monitoring, snapshotting, and persisting scan output.
+
+### Supported Chinese Models
+
+| Model | Provider prefix | Gateway | Status |
+| --- | --- | --- | --- |
+| DeepSeek V4 Flash | `deepseek:` | DeepSeek official | Verified (pre-recon passes) |
+| GLM-5.2 | `openrouter:` | Aliyun MaaS (Chat Completions) | Verified (preflight passes) |
+| Qwen 3.8 Max | `openrouter:` | Aliyun MaaS (Chat Completions) | Verified (recon progressing) |
+
+> **Key insight**: pi's `openai:` provider hardcodes the **Responses API** (`/v1/responses`),
+> which most Chinese gateways do not serve for non-Qwen models. Use the **`openrouter:`**
+> prefix instead — pi's openrouter provider speaks **Chat Completions**, which gateways
+> like Aliyun MaaS accept. See [supported Chinese models](docs/supported-models-cn.md).
+
+### CN Configuration
+
+```toml
+# ~/.shannon/config.toml
+[core]
+model = "openrouter:glm-5.2"          # or deepseek:deepseek-v4-flash / openrouter:qwen3.8-max
+base_url = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+
+[provider]
+api_key = "sk-..."
+```
+
+One-shot setup: `python3 scripts/shannon_cn_config.py <deepseek|aliyun|gateway> --key sk-xxx`
+
+### Companion Tools (`scripts/`)
+
+| Tool | Purpose |
+| --- | --- |
+| `shannon_monitor.py` | Real-time SSE dashboard — watch agents work live (pipeline stages, tool calls, LLM turns, cost) |
+| `shannon_snapshot.py` | Self-contained HTML snapshot of scan progress (no server needed) |
+| `shannon_export.py` | Persist scan results (scan_runs / findings / agents) into SQLite |
+| `shannon_cn_config.py` | One-shot Chinese-model config generator |
+
 ## Editions
+
 
 Shannon ships in two ways: **Shannon Open Source**, the pentester you run yourself, and the **Keygraph platform**, the commercial pentesting product that runs Shannon continuously and closes the full AppSec lifecycle around it.
 
@@ -194,6 +236,8 @@ Use these guides for operational detail:
 | [Source build and CLI commands](docs/development.md) | Cloning, building, common commands, output paths, and local development. |
 | [Configuration](docs/configuration.md) | Authenticated testing, login flows, rules of engagement, and report filters. |
 | [AI providers](docs/ai-providers.md) | Selecting the model, the supported providers (Anthropic, OpenAI, xAI, AWS Bedrock, and any other Pi-supported provider), and custom gateways. |
+| [Chinese models](docs/supported-models-cn.md) | Supported Chinese LLM providers (DeepSeek / GLM / Qwen), config templates, and gateway caveats. |
+| [Dev deliverables](docs/DEV-DELIVERABLES-CN.md) | CN-patch deliverables: model adaptation, SSE monitoring, snapshot, SQLite export. |
 | [Platforms and networking](docs/platforms.md) | Windows/WSL2, Linux, macOS, Docker networking, local apps, and custom hostnames. |
 | [Workspaces and resuming](docs/workspaces.md) | Naming workspaces, resuming interrupted scans, and workspace storage. |
 | [Safety and limitations](docs/safety.md) | Authorized-use requirements, non-production guidance, mutative effects, cost, and model caveats. |
