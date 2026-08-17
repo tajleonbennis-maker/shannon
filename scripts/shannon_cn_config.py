@@ -3,8 +3,8 @@
 Shannon 国产模型一键配置工具（cn-models 定制版配套）
 
 自动生成 ~/.shannon/config.toml，支持：
-  1. DeepSeek 官方（deepseek: 前缀，pi 原生）
-  2. 阿里云 MaaS 网关（openrouter: 前缀 + base_url，走 chat/completions）
+  1. DeepSeek 官方（deepseek: 前缀，pi 原生，key 写入 [deepseek] 段）
+  2. 阿里云 MaaS 网关（openrouter: 前缀 + base_url，走 chat/completions，key 写入 [provider] 段）
   3. 任意 OpenAI 兼容网关
 
 用法:
@@ -12,6 +12,7 @@ Shannon 国产模型一键配置工具（cn-models 定制版配套）
   python3 shannon_cn_config.py aliyun   --key sk-sp-xxx [--model glm-5.2] [--base-url https://...]
   python3 shannon_cn_config.py gateway  --key sk-xxx --model my-model --base-url https://.../v1
   python3 shannon_cn_config.py --list
+  python3 shannon_cn_config.py deepseek --key sk-xxx --dry-run   # 只打印不写文件
 """
 
 import argparse
@@ -30,23 +31,19 @@ KNOWN_MODELS = {
 
 ALIYUN_DEFAULT_BASE = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
 
+# TOML 段说明（与 apps/cli/src/config/resolver.ts 的 CONFIG_MAP 对齐）：
+#   - deepseek 是 curated provider，key 必须写在 [deepseek].api_key（映射 DEEPSEEK_API_KEY）
+#   - openrouter 前缀（aliyun/gateway）非 curated，key 写在 [provider].api_key（映射 SHANNON_AI_API_KEY）
 
-def fmt_toml(model, base_url, api_key):
-    """生成 config.toml 内容。"""
-    lines = ["# Shannon 配置 - 国产模型 (cn-models patch)"]
-    lines.append(f'model = "{model}"')
-    if base_url:
-        lines.append(f'base_url = "{base_url}"')
+
+def build_toml(spec, base, api_key, key_section):
+    """构造 config.toml 内容。key_section: 'deepseek' 或 'provider'。"""
+    lines = ["# Shannon 配置 - 国产模型 (cn-models patch)", "[core]", f'model = "{spec}"']
+    lines.append(f'base_url = "{base}"' if base else "# 直连 DeepSeek 官方")
     lines.append("")
-    # openrouter 前缀的 key 放 [provider]；deepseek 的 key 走 DEEPSEEK_API_KEY 或 [provider]
-    if model.startswith("deepseek:"):
-        lines.append("[provider]")
-        lines.append(f'api_key = "{api_key}"')
-    else:
-        lines.append("[provider]")
-        lines.append(f'api_key = "{api_key}"')
-    lines.append("")
-    return "\n".join(lines)
+    lines.append(f"[{key_section}]")
+    lines.append(f'api_key = "{api_key}"')
+    return "\n".join(lines) + "\n"
 
 
 def write_config(content):
@@ -85,6 +82,7 @@ def main():
     parser.add_argument("--key", help="API Key")
     parser.add_argument("--model", default=None, help="模型 ID")
     parser.add_argument("--base-url", default=None, help="网关地址（gateway 必填）")
+    parser.add_argument("--dry-run", action="store_true", help="只打印生成的 TOML，不写文件")
     args = parser.parse_args()
 
     if args.target == "list" or args.target is None:
@@ -99,34 +97,35 @@ def main():
         model = args.model or "deepseek-v4-flash"
         spec = f"deepseek:{model}"
         base = None
+        key_section = "deepseek"   # curated provider：key 走 [deepseek] 段 → DEEPSEEK_API_KEY
     elif args.target == "aliyun":
         model = args.model or "glm-5.2"
         spec = f"openrouter:{model}"   # 关键：走 chat/completions
         base = args.base_url or ALIYUN_DEFAULT_BASE
+        key_section = "provider"       # 非 curated：key 走 [provider] 段 → SHANNON_AI_API_KEY
     else:  # gateway
         if not args.model or not args.base_url:
             print("[ERR] gateway 需要 --model 和 --base-url", file=sys.stderr)
             sys.exit(1)
         spec = f"openrouter:{args.model}"
         base = args.base_url
+        key_section = "provider"
 
-    content = f"""# Shannon 配置 - 国产模型 (cn-models patch)
-[core]
-model = "{spec}"
-{('base_url = "' + base + '"') if base else '# 直连 DeepSeek 官方'}
-"""
+    content = build_toml(spec, base, args.key, key_section)
 
-    content += f"""
-[provider]
-api_key = "{args.key}"
-"""
+    if args.dry_run:
+        print(content, end="")
+        print("[DRY-RUN] 未写入文件")
+        return
 
     write_config(content)
     print(f"  model     : {spec}")
     if base:
         print(f"  base_url  : {base}")
+    print(f"  key 段    : [{key_section}]")
     print("")
-    print("提示: 运行 npx @keygraph/shannon start 前请确认 Docker 已启动。")
+    print("提示: 本 fork 的补丁在源码/自建镜像中，需 clone 本仓库构建后使用（见 README Quick Start），")
+    print("      官方 npm 包 npx @keygraph/shannon 不含 CN 改造。")
 
 
 if __name__ == "__main__":
