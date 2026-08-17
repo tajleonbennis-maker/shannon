@@ -349,3 +349,52 @@ export async function resolveModelSelection(): Promise<ModelSelection> {
     providerId,
   };
 }
+
+/**
+ * PATCH(cost-opt): Resolve an optional sub-agent (task) model.
+ *
+ * `SHANNON_AI_SUBMODEL` names a cheaper model for the heavy read-heavy
+ * sub-agents (`task` tool). Shannon's prompts delegate the bulk of source
+ * reading to sub-agents, and each sub-agent re-reads code into its own
+ * context — on a 214MB repo that dominates spend. Running sub-agents on a
+ * smaller/cheaper model while keeping the orchestrator on the strong model
+ * can cut cost 3-5x with little quality loss, since sub-agents mostly emit
+ * structured observations rather than final judgments.
+ *
+ * Format: same `<provider>:<model-id>` as SHANNON_AI_MODEL. If unset, sub-agents
+ * inherit the parent model (upstream behavior). The sub-model must resolve in
+ * the same model runtime (same provider credential), so only the model id
+ * changes — endpoint, format, and auth stay identical.
+ */
+export async function resolveSubModelSelection(): Promise<ModelSelection | null> {
+  const raw = process.env.SHANNON_AI_SUBMODEL?.trim();
+  if (!raw) return null;
+
+  const spec = parseModelSpec(raw);
+  if (typeof spec === 'string') {
+    throw new Error(`SHANNON_AI_SUBMODEL: ${spec}`);
+  }
+
+  // Sub-model must share the parent's provider so credentials/endpoint match.
+  const { providerId, modelId } = spec;
+  const parent = resolveModelSpec();
+  if (typeof parent === 'string' || parent.providerId !== providerId) {
+    throw new Error(
+      `SHANNON_AI_SUBMODEL provider "${providerId}" must match SHANNON_AI_MODEL provider "${typeof parent === 'string' ? '?' : parent.providerId}". ` +
+        'Sub-agents reuse the parent credential store; cross-provider sub-models are not supported.',
+    );
+  }
+
+  const credentials = resolveProviderCredentials(providerId);
+  const format = resolveGatewayFormat(providerId, credentials.baseUrl);
+  const modelRuntime = await createModelRuntime(providerId, credentials.apiKey);
+
+  const model = resolveModel(modelRuntime, providerId, modelId, credentials.baseUrl, format);
+  if (!model) {
+    throw new Error(
+      `SHANNON_AI_SUBMODEL: model not found in pi registry: provider="${providerId}" model="${modelId}". Browse valid providers and models at ${PI_CATALOG_URL}.`,
+    );
+  }
+
+  return { model, modelRuntime, modelId, providerId };
+}
