@@ -35,6 +35,7 @@ persistence, and one-shot configuration.
 - [Key Capabilities](#key-capabilities)
 - [Architecture](#architecture)
 - [Documentation](#documentation)
+- [Upstream Sync](#upstream-sync)
 - [Safety, Scope, and Limitations](#safety-scope-and-limitations)
 - [License](#license)
 
@@ -86,40 +87,40 @@ Sample penetration test reports from intentionally vulnerable applications, prod
 
 ## Quick Start
 
-### Prerequisites
+### ⚠️ Important: use this repo's build, not the upstream npm package
 
-- **Docker**: required for the worker container.
-- **Node.js 18+**: required for the recommended `npx` workflow.
-- **AI provider credentials**: Anthropic, OpenAI, xAI, AWS Bedrock, **or any Chinese provider**
-  (DeepSeek / Qwen / GLM via gateway). See [Chinese Model Support](#chinese-model-support).
-- **Cyber safeguards cleared with your provider**: Anthropic and OpenAI apply real-time
-  safeguards to cyber-security workloads, which can interrupt a scan mid-run. Complete their
-  guidance for legitimate security testers before your first run.
+The upstream `npx @keygraph/shannon` package and Docker Hub image do **not** contain this
+fork's CN patches (DeepSeek curation, `deepseek-compat` continuation fix, sub-agent cost
+optimization). Running `npx @keygraph/shannon ...` against this README's instructions would
+silently give you the upstream behavior — your CN configuration would not take effect.
 
-### Run Shannon
+**To use this fork, build from source:**
+
+```bash
+# Prerequisites: Docker, Node.js 18+, pnpm (corepack enable)
+git clone https://github.com/tajleonbennis-maker/shannon.git
+cd shannon
+pnpm install
+pnpm build              # turborepo: builds apps/cli, apps/worker, etc.
+docker build -t keygraph/shannon:cn .   # self-built worker image with CN patches
+```
+
+Then configure credentials and run:
+
+```bash
+# Interactive wizard (source build)
+pnpm --filter @keygraph/shannon setup
+
+# One-shot CN model config (see Chinese Model Support below)
+python3 scripts/shannon_cn_config.py aliyun --key sk-xxx --model glm-5.2
+
+# Run a pentest against a source-available target
+pnpm --filter @keygraph/shannon start -u https://your-app.com -r /path/to/your-repo
+```
 
 > [!WARNING]
 > Shannon actively executes exploits. Run it only against applications and environments you own
 > or have explicit written authorization to test. Do not run Shannon against production systems.
-
-```bash
-# Configure credentials with the interactive wizard.
-npx @keygraph/shannon setup
-
-# Run a pentest against a source-available target.
-npx @keygraph/shannon start -u https://your-app.com -r /path/to/your-repo
-```
-
-Or, using a Chinese model via the one-shot config generator:
-
-```bash
-python3 scripts/shannon_cn_config.py aliyun --key sk-xxx --model glm-5.2
-npx @keygraph/shannon start -u https://your-app.com -r /path/to/your-repo
-```
-
-Shannon pulls the worker image from Docker Hub, starts the required local infrastructure,
-mounts the target repository read-only inside an ephemeral worker container, and writes
-results to a local workspace.
 
 ## Chinese Model Support
 
@@ -150,16 +151,28 @@ base_url = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
 api_key = "sk-..."
 ```
 
+> Note: for `deepseek:` models the key lives in the **`[deepseek]`** section
+> (maps to `DEEPSEEK_API_KEY`), not `[provider]`. See `docs/supported-models-cn.md`.
+
 One-shot setup: `python3 scripts/shannon_cn_config.py <deepseek|aliyun|gateway> --key sk-xxx`
+
+Optional cost optimization — run `task` sub-agents on a cheaper model
+(`core.sub_model` / `SHANNON_AI_SUBMODEL`, must be same provider as the main model):
+
+```toml
+[core]
+model = "deepseek:deepseek-v4-pro"
+sub_model = "deepseek:deepseek-v4-flash"
+```
 
 ## Companion Tools
 
 | Tool | Purpose |
 | --- | --- |
-| `shannon_monitor.py` | Real-time SSE dashboard — watch agents work live (pipeline stages, tool calls, LLM turns, cost) |
+| `shannon_monitor.py` | Real-time SSE dashboard — watch agents work live (pipeline stages, tool calls, LLM turns, cost). Defaults to `127.0.0.1`; add `--token` for public exposure |
 | `shannon_snapshot.py` | Self-contained HTML snapshot of scan progress (no server needed) |
 | `shannon_export.py` | Persist scan results (scan_runs / findings / agents) into SQLite |
-| `shannon_cn_config.py` | One-shot Chinese-model config generator |
+| `shannon_cn_config.py` | One-shot Chinese-model config generator (`--dry-run` supported) |
 
 ## Key Capabilities
 
@@ -241,6 +254,22 @@ Use these guides for operational detail:
 | [Workspaces and resuming](docs/workspaces.md) | Naming workspaces, resuming interrupted scans, and workspace storage. |
 | [Safety and limitations](docs/safety.md) | Authorized-use requirements, non-production guidance, mutative effects, cost, and model caveats. |
 | [Coverage and roadmap](docs/coverage-roadmap.md) | Current vulnerability coverage and planned work. |
+
+## Upstream Sync
+
+This repository is a customized fork of [KeygraphHQ/shannon](https://github.com/KeygraphHQ/shannon).
+
+- **Baseline**: `2.4.0` (upstream commit `9f22ef2`), with the `deepseek-compat` hot patch applied.
+- **Local changes are deliberately small and concentrated** so merges stay cheap:
+  - `apps/worker/src/ai/models.ts` — DeepSeek curated provider, sub-model resolution
+  - `apps/worker/src/ai/pi/pi-executor.ts` — deepseek-compat continuation fix, sub-model wiring
+  - `apps/cli/src/config/resolver.ts` / `writer.ts` / `model-spec.ts` / `setup.ts` — `[deepseek]` TOML section
+  - `scripts/` — companion tools (monitor / snapshot / export / cn_config)
+  - `patches/` — hot-patch scripts to re-apply CN fixes onto upstream images
+- **Re-applying patches**: see [patches/README.md](patches/README.md) for the `patch_pi_executor.py`
+  flow (hot-patch a released image without a full rebuild).
+- **Sync rhythm**: we plan to rebase against upstream monthly. Prefer contributing generic fixes
+  (e.g. `deepseek-compat`) back upstream to shrink the local patch surface over time.
 
 ## Safety, Scope, and Limitations
 
