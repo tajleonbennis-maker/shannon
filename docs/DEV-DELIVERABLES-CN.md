@@ -34,13 +34,19 @@
 ### 一键配置工具
 
 ```bash
-# DeepSeek 官方
+# DeepSeek 官方（key 写入 [deepseek] 段）
 python3 shannon_cn_config.py deepseek --key sk-xxx
-# 阿里云 MaaS（默认 glm-5.2）
+# 阿里云 MaaS（默认 glm-5.2，key 写入 [provider] 段）
 python3 shannon_cn_config.py aliyun --key sk-sp-xxx
 # 任意 OpenAI 兼容网关
 python3 shannon_cn_config.py gateway --key sk-xxx --model my-model --base-url https://.../v1
+# 只打印配置不写文件
+python3 shannon_cn_config.py deepseek --key sk-xxx --dry-run
 ```
+
+> 注意：`deepseek` 是 curated provider，key 必须写 `[deepseek]` 段；`aliyun/gateway` 走
+> `openrouter:`（非 curated），key 写 `[provider]` 段。与 `apps/cli/src/config/resolver.ts`
+> 的 CONFIG_MAP 严格对齐，写错段会被 CLI 校验拦截。
 
 ---
 
@@ -48,18 +54,24 @@ python3 shannon_cn_config.py gateway --key sk-xxx --model my-model --base-url ht
 
 **方案选型**（调研四类方案后）：借鉴 Aikido Attack 的"实时可见 agent 行为"思路，做轻量 SSE 服务，不引入重依赖。
 
-### shannon_monitor.py（已在服务器 8787 端口运行）
+### shannon_monitor.py（SSE 实时监控）
 
 - **管线进度条**：13 个阶段（Pre-Recon → Recon → 5×Vuln → 5×Exploit → Report）实时变色
 - **Agent 明细表**：状态/轮次/耗时/成本/模型
 - **实时活动流**：SSE 推送工具调用和 LLM 轮次，浏览器无需刷新
+- **running 状态判定**：结合 `workflow.log` 最近事件时间推断（5 分钟内视为运行中），
+  不再依赖 agent 写回 session
+- **安全默认**：默认监听 `127.0.0.1`；公网部署必须 `--token` + nginx 反代鉴权
 - 纯 Python 标准库，零第三方依赖，深色主题
 
 ```bash
-# 启动
-python3 shannon_monitor.py ~/.shannon/workspaces/deeptutor-scan --port 8787
+# 启动（本机访问）
+python3 shannon_monitor.py ~/.shannon/workspaces/<scan-workspace> --port 8787
+# 带鉴权启动（公网/多用户场景）
+python3 shannon_monitor.py <workspace> --port 8787 --token YOUR_TOKEN
 # 浏览器访问
-http://<服务器IP>:8787
+http://127.0.0.1:8787           # 本机
+http://127.0.0.1:8787/?token=YOUR_TOKEN   # 带鉴权
 ```
 
 ### shannon_snapshot.py（定时快照版）
@@ -74,7 +86,7 @@ python3 shannon_snapshot.py <workspace> --out report.html --live  # --live 页�
 
 ## 3️⃣ 支持的模型清单
 
-已整理到 `docs/supported-models-cn.md`，包含：已验证模型表、配置模板、**关键坑说明**（openai 前缀陷阱）、环境变量方式、已知限制。
+已整理到 `docs/supported-models-cn.md`，包含：已验证模型表、配置模板、**关键坑说明**（openai 前缀陷阱）、环境变量方式、已知限制、子代理成本优化（SHANNON_AI_SUBMODEL）。
 
 ---
 
@@ -95,9 +107,9 @@ python3 shannon_export.py --list
 - `findings`：漏洞发现（类型/严重度/位置/摘要/利用步骤/原始JSON）
 - `agents`：各阶段 agent 执行记录（耗时/成本/token/模型）
 
-**已验证**：成功提取 deeptutor-scan 的 4 条 agent 记录（含 deepseek pre-recon $0.33 + 3 次 recon 尝试及各自模型/成本）。
+**已验证**：成功提取内部验证扫描的 4 条 agent 记录（含 deepseek pre-recon $0.33 + 3 次 recon 尝试及各自模型/成本）。
 
-后续可平滑迁移 PostgreSQL（对接 165.154.226.119 现有 PG16）或接 SysReptor 做报告管理。
+后续可平滑迁移 PostgreSQL（对接内部现有 PG16）或接 SysReptor 做报告管理。
 
 ---
 
@@ -121,6 +133,6 @@ shannon/
 ## ⏭️ 待办
 
 - [x] 代码改动 commit + push 到 tajleonbennis-maker/shannon
-- [x] 监控服务加 systemd 常驻 + nginx 反代（可公网访问）
-- [x] DeepTutor 完整扫描跑完后，落库 + 生成最终报告
+- [x] 监控服务加 systemd 常驻 + nginx 反代（公网部署必须加鉴权）
+- [x] 内部验证目标完整扫描跑完后，落库 + 生成最终报告
 - [x] （可选）落库对接 PostgreSQL / SysReptor
