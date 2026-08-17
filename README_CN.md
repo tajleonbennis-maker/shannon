@@ -33,6 +33,7 @@ Shannon 是一个自主 AI 驱动的 Web 应用与 API 渗透测试框架。
 - [核心能力](#核心能力)
 - [架构设计](#架构设计)
 - [文档](#文档)
+- [上游同步](#上游同步)
 - [安全、范围与限制](#安全范围与限制)
 - [许可证](#许可证)
 
@@ -82,38 +83,39 @@ Shannon 在故意存在漏洞的靶场应用上的实测报告：
 
 ## 快速开始
 
-### 环境要求
+### ⚠️ 重要：请用本仓库自建，不要直接跑上游 npm 包
 
-- **Docker**：运行 worker 容器必需
-- **Node.js 18+**：推荐 `npx` 工作流
-- **AI 提供商凭据**：Anthropic、OpenAI、xAI、AWS Bedrock，**或任意国产提供商**
-  （DeepSeek / Qwen / GLM，详见[国产模型支持](#国产模型支持)）
-- **与提供商完成网络安全防护认证**：Anthropic 与 OpenAI 会对网络安全工作负载施加
-  实时防护，可能中断扫描，需提前完成安全测试者合规指引
+官方 `npx @keygraph/shannon` 包与 Docker Hub 镜像**不包含本 fork 的 CN 改造**
+（DeepSeek curated、deepseek-compat 续跑补丁、子代理成本优化等）。直接按本文档
+跑 `npx @keygraph/shannon ...` 会静默得到上游行为——你的国产模型配置不会生效。
 
-### 运行 Shannon
+**使用本 fork 需要从源码构建：**
+
+```bash
+# 前置：Docker、Node.js 18+、pnpm（corepack enable）
+git clone https://github.com/tajleonbennis-maker/shannon.git
+cd shannon
+pnpm install
+pnpm build              # turborepo：构建 apps/cli、apps/worker 等
+docker build -t keygraph/shannon:cn .   # 自建含 CN 补丁的 worker 镜像
+```
+
+然后配置凭据并运行：
+
+```bash
+# 交互式向导（源码构建）
+pnpm --filter @keygraph/shannon setup
+
+# 国产模型一键配置（见下方"国产模型支持"）
+python3 scripts/shannon_cn_config.py aliyun --key sk-xxx --model glm-5.2
+
+# 对源码可用的目标运行渗透测试
+pnpm --filter @keygraph/shannon start -u https://your-app.com -r /path/to/your-repo
+```
 
 > [!WARNING]
 > Shannon 会主动执行漏洞利用。请仅对**你拥有**或**已获得明确书面授权**的
 > 应用运行，切勿对生产系统运行。
-
-```bash
-# 使用交互式向导配置凭据
-npx @keygraph/shannon setup
-
-# 对源码可用的目标运行渗透测试
-npx @keygraph/shannon start -u https://your-app.com -r /path/to/your-repo
-```
-
-使用国产模型一键配置：
-
-```bash
-python3 scripts/shannon_cn_config.py aliyun --key sk-xxx --model glm-5.2
-npx @keygraph/shannon start -u https://your-app.com -r /path/to/your-repo
-```
-
-Shannon 从 Docker Hub 拉取 worker 镜像，启动所需本地基础设施，将目标仓库以只读方式
-挂载进临时 worker 容器，并把结果写入本地工作区。
 
 ## 国产模型支持
 
@@ -144,16 +146,28 @@ base_url = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
 api_key = "sk-..."
 ```
 
+> 注意：`deepseek:` 模型的 key 写在 **`[deepseek]`** 段（映射 `DEEPSEEK_API_KEY`），
+> 不是 `[provider]`。详见 `docs/supported-models-cn.md`。
+
 一键配置：`python3 scripts/shannon_cn_config.py <deepseek|aliyun|gateway> --key sk-xxx`
+
+可选成本优化——让 `task` 子代理用更便宜的模型（`core.sub_model` / `SHANNON_AI_SUBMODEL`，
+须与主模型同 provider）：
+
+```toml
+[core]
+model = "deepseek:deepseek-v4-pro"
+sub_model = "deepseek:deepseek-v4-flash"
+```
 
 ## 配套工具
 
 | 工具 | 用途 |
 | --- | --- |
-| `shannon_monitor.py` | SSE 实时监控看板——实时观看 agent 工作（管线阶段 / 工具调用 / LLM 轮次 / 成本） |
+| `shannon_monitor.py` | SSE 实时监控看板——实时观看 agent 工作（管线阶段 / 工具调用 / LLM 轮次 / 成本）。默认仅监听 127.0.0.1，公网暴露需 `--token` |
 | `shannon_snapshot.py` | 自包含 HTML 进度快照（无需常驻服务） |
 | `shannon_export.py` | 扫描结果落库 SQLite（scan_runs / findings / agents 三表） |
-| `shannon_cn_config.py` | 国产模型一键配置生成器 |
+| `shannon_cn_config.py` | 国产模型一键配置生成器（支持 `--dry-run`） |
 
 ## 核心能力
 
@@ -227,6 +241,22 @@ Shannon 采用**多代理工作流**，结合源码分析与在线利用：
 | [工作区与续跑](docs/workspaces.md) | 工作区命名、中断续跑、工作区存储。 |
 | [安全与限制](docs/safety.md) | 授权使用要求、非生产环境指引、变更影响、成本与模型注意事项。 |
 | [覆盖范围与路线图](docs/coverage-roadmap.md) | 当前漏洞覆盖范围与后续规划。 |
+
+## 上游同步
+
+本仓库是 [KeygraphHQ/shannon](https://github.com/KeygraphHQ/shannon) 的定制 fork。
+
+- **基线**：`2.4.0`（上游 commit `9f22ef2`），已应用 `deepseek-compat` 热补丁。
+- **本地改动刻意小而集中**，保证合并不贵：
+  - `apps/worker/src/ai/models.ts` — DeepSeek curated provider、子模型解析
+  - `apps/worker/src/ai/pi/pi-executor.ts` — deepseek-compat 续跑修复、子模型接线
+  - `apps/cli/src/config/resolver.ts` / `writer.ts` / `model-spec.ts` / `setup.ts` — `[deepseek]` TOML 段
+  - `scripts/` — 配套工具（monitor / snapshot / export / cn_config）
+  - `patches/` — 热补丁脚本，可对上游镜像重放 CN 修复
+- **补丁重放**：见 [patches/README.md](patches/README.md) 的 `patch_pi_executor.py` 流程
+  （对已发布镜像打热补丁，无需全量重建）。
+- **同步节奏**：计划每月对上游 rebase 一次；优先把通用修复（如 `deepseek-compat`）
+  贡献回上游，逐步缩小本地补丁面。
 
 ## 安全、范围与限制
 
