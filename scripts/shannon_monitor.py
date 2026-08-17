@@ -8,8 +8,14 @@ Shannon 实时监控服务（SSE 推送版）
 技术栈：纯 Python 标准库（http.server + threading），零第三方依赖。
 
 用法:
-  python3 shannon_monitor.py <workspace_dir> [--port 8787] [--history 200]
-  然后浏览器打开 http://localhost:8787
+  python3 shannon_monitor.py <workspace_dir> [--port 8787] [--history 200] [--token TOKEN]
+  然后浏览器打开 http://127.0.0.1:8787  （默认只监听本机）
+  带 --token 时：浏览器访问 http://127.0.0.1:8787/?token=TOKEN
+
+安全说明：
+  - 默认 --host 127.0.0.1，仅本机可访问
+  - 公网部署必须：--host 0.0.0.0 + --token，并在 nginx 反代层再加鉴权
+  - /api/state 与 /stream 校验 token（Authorization: Bearer <token> 或 ?token=<token>）
 
 页面功能：
   - 管线阶段进度条（13 个阶段实时变色）
@@ -26,6 +32,7 @@ import re
 import sys
 import threading
 import time
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -58,6 +65,8 @@ AGENT_PHASE = {
 
 WORKSPACE = None
 HISTORY = 200
+AUTH_TOKEN = None
+RUNNING_WINDOW_SEC = 300  # 最近事件在该窗口内 → 判定为 running
 
 
 # ============ 数据读取 ============
@@ -92,15 +101,33 @@ def read_workflow_tail(workspace, limit=500):
         line = line.strip()
         if not line or line.startswith("="):
             continue
-        m = re.match(r"\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] \[(\w+)\] \[(\w+)\](?:: (.*))?", line)
+        m = re.match(r"\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] \[([\w-]+)\] \[(\w+)\](?:: (.*))?", line)
         if m:
             events.append({
                 "time": m.group(1)[5:],  # MM-DD HH:MM:SS
+                "ts": m.group(1),        # 完整 YYYY-MM-DD HH:MM:SS，用于 running 判定
                 "agent": m.group(2),
                 "type": m.group(3),
                 "detail": (m.group(4) or "")[:240],
             })
     return events
+
+
+def infer_running(events, status):
+    """若最近 workflow.log 事件在 RUNNING_WINDOW_SEC 内，判定为 running。"""
+    if status in ("running", "failed", "pending", "unknown"):
+        for ev in reversed(events):
+            ts = ev.get("ts")
+            if not ts:
+                continue
+            try:
+                t = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                continue
+            if (datetime.now() - t).total_seconds() <= RUNNING_WINDOW_SEC:
+                return True
+            break  # 最后一条已超时，无需继续
+    return False
 
 
 def collect_agents(session):
@@ -145,9 +172,8 @@ def snapshot():
     status = sess.get("status", "unknown")
     # running 检测：status 还是 running，或 worker 容器活着
     events = read_workflow_tail(WORKSPACE)
-    if events and status in ("running", "failed"):
-        # 最近事件在 5 分钟内 → 认为还在跑
-        pass
+    if infer_running(events, status):
+        status = "running"
 
     return {
         "scan": {
@@ -258,7 +284,10 @@ td{padding:5px 9px;font-size:12px;border-bottom:1px solid #232734;font-family:mo
 <div class="card"><h2>Agent 执行</h2><table><thead><tr><th>Agent</th><th>状态</th><th>轮次</th><th>耗时</th><th>成本</th><th>模型</th></tr></thead><tbody id="agents"><tr><td colspan="6">加载中...</td></tr></tbody></table></div>
 <div class="card"><h2>实时活动流 <span style="color:#666;font-weight:400;" id="evCount"></span></h2><div id="events">连接中...</div></div>
 <script>
-const evtSource = new EventSource('/stream');
+const qs = new URLSearchParams(location.search);
+const TOKEN = qs.get('token') || '';
+const authQuery = TOKEN ? ('?token=' + encodeURIComponent(TOKEN)) : '';
+const evtSource = new EventSource('/stream' + authQuery);
 const seen = new Set();
 evtSource.onmessage = (e) => {
   const msg = JSON.parse(e.data);
@@ -316,6 +345,16 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def authorized(self, parsed):
+        """token 校验：未配置 token 则放行；配置后校验 Authorization 头或 ?token=。"""
+        if not AUTH_TOKEN:
+            return True
+        auth = self.headers.get("Authorization", "")
+        if auth == f"Bearer {AUTH_TOKEN}":
+            return True
+        qs = parse_qs(parsed.query)
+        return qs.get("token", [None])[0] == AUTH_TOKEN
+
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path in ("/", "/index.html"):
@@ -326,6 +365,11 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         elif parsed.path == "/api/state":
+            if not self.authorized(parsed):
+                self.send_response(401)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             data = json.dumps(snapshot()).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -333,6 +377,11 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         elif parsed.path == "/stream":
+            if not self.authorized(parsed):
+                self.send_response(401)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             self.handle_sse()
         else:
             self.send_response(404)
@@ -369,11 +418,12 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global WORKSPACE, HISTORY
+    global WORKSPACE, HISTORY, AUTH_TOKEN
     parser = argparse.ArgumentParser(description="Shannon 实时监控（SSE）")
     parser.add_argument("workspace", help="workspace 目录")
     parser.add_argument("--port", type=int, default=8787)
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1；公网部署必须加 --token 并配反向代理鉴权）")
+    parser.add_argument("--token", default=None, help="访问令牌：/api/state 与 /stream 需 Authorization: Bearer <token> 或 ?token=<token>")
     parser.add_argument("--history", type=int, default=200)
     args = parser.parse_args()
 
@@ -383,11 +433,13 @@ def main():
 
     WORKSPACE = args.workspace
     HISTORY = args.history
+    AUTH_TOKEN = args.token
 
     t = threading.Thread(target=broadcaster.watch, daemon=True)
     t.start()
 
-    print(f"[OK] Shannon 实时监控: http://{args.host}:{args.port}")
+    auth_note = f"（token 已启用，浏览器访问 /?token=<token>）" if AUTH_TOKEN else "（无鉴权，仅限本机）"
+    print(f"[OK] Shannon 实时监控: http://{args.host}:{args.port} {auth_note}")
     print(f"  workspace: {WORKSPACE}")
     try:
         ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
